@@ -19,10 +19,18 @@ app.use(express.json({ limit: '50mb' }));
 
 // Initialize Passport
 const session = require('express-session');
+// SameSite=None + Secure so OIDC state survives cross-site embeds (e.g. Zep).
+// Requires HTTPS and trust proxy (set above) when behind a reverse proxy.
 app.use(session({
     secret: process.env.JWT_SECRET || 'keyboard cat',
     resave: false,
-    saveUninitialized: true
+    saveUninitialized: true,
+    proxy: true,
+    cookie: {
+        sameSite: 'none',
+        secure: true,
+        httpOnly: true,
+    },
 }));
 app.use(passport.initialize());
 app.use(passport.session());
