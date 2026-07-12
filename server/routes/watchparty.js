@@ -14,11 +14,13 @@ router.post(
 
             const restreamer = createRestreamer();
 
-            const info = await restreamer.getInfo();
+            const process = await restreamer.createProcess(req.body.url);
 
             res.json({
-                success: true,
-                restreamer: info
+                success:true,
+                process,
+                streamUrl:
+                    `https://stream.productivity-cafe.com/memfs/${process.id}.m3u8`
             });
 
         } catch (err) {
