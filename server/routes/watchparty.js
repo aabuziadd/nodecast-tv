@@ -1,31 +1,37 @@
 const express = require("express");
 const router = express.Router();
-const { client } = require("../services/restreamer");
 
 const auth = require("../auth");
+const { createRestreamer } = require("../services/restreamer");
+
 
 router.post(
     "/start",
     auth.requireAuth,
     async (req, res) => {
 
-        const { url } = req.body;
+        try {
 
-        if (!url) {
-            return res.status(400).json({
-                error: "Missing stream URL"
+            const restreamer = createRestreamer();
+
+            const info = await restreamer.getInfo();
+
+            res.json({
+                success: true,
+                restreamer: info
             });
+
+        } catch (err) {
+
+            console.error("Watchparty error:", err);
+
+            res.status(500).json({
+                error: err.message
+            });
+
         }
-
-        const response = await client.get("/api");
-
-        console.log(response.data);
-        
-        res.json({
-            success: true
-        });
-
     }
 );
+
 
 module.exports = router;
