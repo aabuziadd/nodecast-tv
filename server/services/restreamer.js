@@ -91,9 +91,7 @@ class RestreamerApi {
 
     async createProcess(sourceUrl) {
 
-        const processId =
-            `watchparty-${Date.now()}`;
-
+        const processId = `watchparty-${Date.now()}`;
 
         const body = {
             id: processId,
@@ -111,37 +109,29 @@ class RestreamerApi {
                     id: "0",
                     address: "{memfs}/{processid}.m3u8",
                     options: [
-                        "-f",
-                        "hls",
-                        "-hls_time",
-                        "4",
-                        "-hls_list_size",
-                        "6",
-                        "-hls_flags",
-                        "delete_segments"
+                        "-c:v", "copy",
+                        "-c:a", "copy",
+
+                        "-f", "hls",
+
+                        "-hls_time", "4",
+                        "-hls_list_size", "6",
+                        "-hls_flags", "delete_segments"
                     ]
                 }
             ],
 
             autostart: true,
-
             reconnect: true,
-
             reconnect_delay_seconds: 10,
-
             stale_timeout_seconds: 30,
-
             reference: "nodecast-watchparty"
         };
 
-
-        return this.request(
-            "/api/v3/process",
-            {
-                method: "POST",
-                body: JSON.stringify(body)
-            }
-        );
+        return this.request("/api/v3/process", {
+            method: "POST",
+            body: JSON.stringify(body)
+        });
     }
 }
 
