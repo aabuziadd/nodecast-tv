@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const { client } = require("../services/restreamer");
 
 const auth = require("../auth");
 
@@ -16,6 +17,10 @@ router.post(
             });
         }
 
+        const response = await client.get("/api");
+
+        console.log(response.data);
+        
         res.json({
             success: true
         });
