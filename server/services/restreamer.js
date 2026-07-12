@@ -1,6 +1,5 @@
 /**
  * Datarhei Restreamer/Core API Client
- * Handles authentication and API calls
  */
 
 class RestreamerApi {
@@ -8,87 +7,90 @@ class RestreamerApi {
         this.baseUrl = baseUrl.replace(/\/+$/, '');
         this.username = username;
         this.password = password;
-        this.token = null;
+
+        this.accessToken = null;
+        this.refreshToken = null;
     }
 
-    /**
-     * Login and get JWT token
-     */
+
     async login() {
-        const response = await fetch(`${this.baseUrl}/api/login`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                username: this.username,
-                password: this.password
-            })
-        });
+        const response = await fetch(
+            `${this.baseUrl}/api/login`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    username: this.username,
+                    password: this.password
+                })
+            }
+        );
+
 
         if (!response.ok) {
             throw new Error(
-                `Restreamer login failed: ${response.status} ${response.statusText}`
+                `Restreamer login failed: ${response.status}`
             );
         }
 
+
         const data = await response.json();
 
-        this.token = data.token;
+        this.accessToken = data.access_token;
+        this.refreshToken = data.refresh_token;
 
         return data;
     }
 
 
-    /**
-     * Make authenticated API request
-     */
     async request(path, options = {}) {
 
-        if (!this.token) {
+        if (!this.accessToken) {
             await this.login();
         }
 
-        const response = await fetch(`${this.baseUrl}${path}`, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.token}`,
-                ...(options.headers || {})
+
+        const response = await fetch(
+            `${this.baseUrl}${path}`,
+            {
+                ...options,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization":
+                        `Bearer ${this.accessToken}`,
+                    ...(options.headers || {})
+                }
             }
-        });
+        );
 
 
-        // Token expired, retry once
         if (response.status === 401) {
             await this.login();
-
             return this.request(path, options);
         }
 
 
         if (!response.ok) {
+            const body = await response.text();
+
             throw new Error(
-                `Restreamer API error: ${response.status} ${response.statusText}`
+                `Restreamer API ${response.status}: ${body}`
             );
         }
+
 
         return response.json();
     }
 
 
-    /**
-     * Test connection
-     */
     async getInfo() {
-        return this.request('/api/v3');
+        return this.request("/api/v3/config");
     }
 }
 
 
-/**
- * Factory from environment
- */
 function createRestreamer() {
     return new RestreamerApi(
         process.env.RESTREAMER_URL,
