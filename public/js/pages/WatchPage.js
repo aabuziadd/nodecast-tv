@@ -185,8 +185,17 @@ class WatchPage {
         // Video events
         this.video?.addEventListener('timeupdate', () => this.updateProgress());
         this.video?.addEventListener('loadedmetadata', () => this.onMetadataLoaded());
-        this.video?.addEventListener('play', () => this.onPlay());
-        this.video?.addEventListener('pause', () => this.onPause());
+        this.video?.addEventListener('play', () => {
+            this.onPlay();
+            if (this._shareSync) this.publishSharePosition().catch(() => {});
+        });
+        this.video?.addEventListener('pause', () => {
+            this.onPause();
+            if (this._shareSync) this.publishSharePosition().catch(() => {});
+        });
+        this.video?.addEventListener('seeked', () => {
+            if (this._shareSync) this.publishSharePosition().catch(() => {});
+        });
         this.video?.addEventListener('ended', () => this.onEnded());
         this.video?.addEventListener('error', (e) => this.onError(e));
         this.video?.addEventListener('waiting', () => this.showLoading());
@@ -629,6 +638,7 @@ class WatchPage {
         // Stop history tracking and save final progress
         this.stopHistoryTracking();
         this.saveProgress();
+        this.stopSharePositionSync();
 
         // Cleanup transcode session if exists
         this.stopTranscodeSession();
@@ -735,7 +745,8 @@ class WatchPage {
 
     /**
      * Publish the host's current playlist + playhead for share.html.
-     * Uses the existing transcode session (1 FFmpeg) — no second live encode.
+     * Server advances position by wall clock while playing — host only
+     * republishes on Share Live / seek / pause / play.
      */
     async shareLive() {
         let playlistUrl = null;
@@ -755,18 +766,14 @@ class WatchPage {
         if (btn) btn.textContent = 'Sharing…';
 
         try {
-            // Playlist-relative playhead (session -ss already baked into the m3u8)
-            const position = Math.max(0, Math.floor(this.video?.currentTime || 0));
-            await API.watchparty.publishShare(playlistUrl, {
-                position,
-                playing: !this.video?.paused,
-                sessionId: this.currentSessionId || null
-            });
+            this.sharePlaylistUrl = playlistUrl;
+            this._shareSync = true;
+            await this.publishSharePosition();
             if (btn) {
                 btn.textContent = '✓ Shared!';
                 setTimeout(() => { btn.innerHTML = shareLabel; }, 1500);
             }
-            console.log('[WatchPage] Shared host playlist', playlistUrl, 'at', position);
+            console.log('[WatchPage] Shared host playlist', playlistUrl);
         } catch (err) {
             console.error('[WatchPage] Share Live failed:', err);
             if (btn) {
@@ -774,6 +781,20 @@ class WatchPage {
                 setTimeout(() => { btn.innerHTML = shareLabel; }, 2000);
             }
         }
+    }
+
+    async publishSharePosition() {
+        if (!this._shareSync || !this.sharePlaylistUrl) return;
+        await API.watchparty.publishShare(this.sharePlaylistUrl, {
+            position: Math.max(0, this.video?.currentTime || 0),
+            playing: !this.video?.paused,
+            sessionId: this.currentSessionId || null
+        });
+    }
+
+    stopSharePositionSync() {
+        this._shareSync = false;
+        this.sharePlaylistUrl = null;
     }
 
     // === UI Updates ===

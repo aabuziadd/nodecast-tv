@@ -1,16 +1,18 @@
 /**
  * share.html — play host's session m3u8 and seek to host playhead.
- * One host FFmpeg/session; no separate live encode.
+ * GET /api/watchparty/share already advances position while playing.
  */
 (function () {
     const video = document.getElementById('video');
     const offline = document.getElementById('offline');
     const POLL_MS = 2000;
+    const SEEK_DRIFT_SEC = 5;
 
     let hls = null;
     let currentUrl = null;
     let lastUpdatedAt = null;
     let lastPosition = null;
+    let hasJoined = false;
 
     function setOffline(show) {
         offline.classList.toggle('hidden', !show);
@@ -35,7 +37,7 @@
         return `${window.location.origin}${url}`;
     }
 
-    function seekToPosition(position) {
+    function seekToPosition(position, { force = false } = {}) {
         if (typeof position !== 'number' || position < 0 || !isFinite(position)) return;
 
         const apply = () => {
@@ -44,7 +46,8 @@
             if (isFinite(duration) && duration > 0) {
                 t = Math.min(position, Math.max(0, duration - 0.25));
             }
-            if (Math.abs((video.currentTime || 0) - t) > 1) {
+            const drift = Math.abs((video.currentTime || 0) - t);
+            if (force || drift > SEEK_DRIFT_SEC) {
                 video.currentTime = t;
             }
             tryAutoplay();
@@ -62,6 +65,7 @@
         if (!abs) return;
 
         currentUrl = abs;
+        hasJoined = true;
         destroyPlayer();
         setOffline(false);
 
@@ -71,23 +75,22 @@
             hls = new Hls({
                 enableWorker: true,
                 startPosition: startPos,
-                // VOD session playlists grow; don't treat as low-latency live
                 lowLatencyMode: false
             });
             hls.loadSource(abs);
             hls.attachMedia(video);
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                seekToPosition(position);
+                seekToPosition(position, { force: true });
             });
             hls.on(Hls.Events.ERROR, (_e, data) => {
                 if (!data.fatal) return;
-                // Growing VOD playlist may 404 briefly — retry
                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                     hls.startLoad();
                     return;
                 }
                 destroyPlayer();
                 currentUrl = null;
+                hasJoined = false;
                 setOffline(true);
             });
             return;
@@ -95,7 +98,11 @@
 
         if (video.canPlayType('application/vnd.apple.mpegurl') || abs.includes('.mp4') || abs.includes('/remux')) {
             video.src = abs;
-            video.addEventListener('loadedmetadata', () => seekToPosition(position), { once: true });
+            video.addEventListener(
+                'loadedmetadata',
+                () => seekToPosition(position, { force: true }),
+                { once: true }
+            );
             return;
         }
 
@@ -109,6 +116,7 @@
             if (currentUrl) {
                 destroyPlayer();
                 currentUrl = null;
+                hasJoined = false;
             }
             setOffline(true);
             return;
@@ -116,29 +124,27 @@
 
         const updatedAt = state.updatedAt || null;
         const abs = toAbsolute(state.url);
+        // Server already extrapolated position while playing
         const position = typeof state.position === 'number' ? state.position : 0;
 
-        // Same publish — nothing to do
-        if (updatedAt && updatedAt === lastUpdatedAt) {
+        // Same host snapshot — online viewers keep playing locally
+        if (updatedAt && updatedAt === lastUpdatedAt && hasJoined) {
             return;
         }
 
         const urlChanged = abs !== currentUrl;
-        const positionChanged =
-            lastPosition == null || Math.abs(position - lastPosition) > 1;
+        const isFirstJoin = !hasJoined || !currentUrl;
 
         lastUpdatedAt = updatedAt || Date.now();
         lastPosition = position;
 
-        if (urlChanged || !currentUrl) {
+        if (urlChanged || isFirstJoin) {
             playUrl(state.url, position);
             return;
         }
 
-        // Same host playlist — just jump to new playhead (re-Share Live)
-        if (positionChanged) {
-            seekToPosition(position);
-        }
+        // Host seek / pause / resume — correct if drifted
+        seekToPosition(position, { force: false });
 
         if (state.playing === false) {
             video.pause();
@@ -159,6 +165,8 @@
 
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
+            // Treat as a fresh join check so pause/seek while hidden is applied
+            lastUpdatedAt = null;
             pollShare();
             if (currentUrl && video.paused) tryAutoplay();
         }
@@ -167,12 +175,11 @@
     pollShare();
     setInterval(pollShare, POLL_MS);
 
-    // Host VOD playlist grows — retry seek once duration catches the published position
     video.addEventListener('durationchange', () => {
         if (lastPosition == null) return;
         if (!isFinite(video.duration) || video.duration < lastPosition) return;
-        if (Math.abs((video.currentTime || 0) - lastPosition) > 2) {
-            seekToPosition(lastPosition);
+        if (Math.abs((video.currentTime || 0) - lastPosition) > SEEK_DRIFT_SEC) {
+            seekToPosition(lastPosition, { force: true });
         }
     });
 })();

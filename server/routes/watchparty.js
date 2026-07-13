@@ -6,7 +6,7 @@ const { createRestreamer } = require("../services/restreamer");
 
 /**
  * Published share for share.html — host's existing playlist + playhead.
- * No second FFmpeg / live session.
+ * position/updatedAt are a snapshot; GET extrapolates while playing.
  */
 let sharedState = {
     url: null,
@@ -15,6 +15,23 @@ let sharedState = {
     updatedAt: null,
     sessionId: null
 };
+
+function getLiveShareState() {
+    if (!sharedState.url || sharedState.updatedAt == null) {
+        return { ...sharedState };
+    }
+
+    let position = sharedState.position || 0;
+    if (sharedState.playing !== false) {
+        const elapsed = (Date.now() - sharedState.updatedAt) / 1000;
+        if (elapsed > 0) position += elapsed;
+    }
+
+    return {
+        ...sharedState,
+        position
+    };
+}
 
 /**
  * Publish the host playback URL (usually the normal transcode session m3u8)
@@ -44,7 +61,7 @@ router.post(
 
             res.json({
                 success: true,
-                ...sharedState,
+                ...getLiveShareState(),
                 sharePage: "/share.html"
             });
         } catch (err) {
@@ -56,12 +73,13 @@ router.post(
 
 /**
  * Current share pointer (public).
+ * While playing, position advances from the last host snapshot by wall clock.
  * GET /api/watchparty/share
  */
 router.get("/share", (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.json(sharedState);
+    res.json(getLiveShareState());
 });
 
 // --- Restreamer ---
