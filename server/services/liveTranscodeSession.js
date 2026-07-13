@@ -75,12 +75,6 @@ class LiveTranscodeSession {
 
         args.push('-i', this.url);
 
-        // Same stereo downmix + async resample as VOD sessions.
-        // Bare `-ac 2` on 5.1/AC3 sources (or drifting timestamps) causes robotic audio.
-        const audioFilter =
-            'pan=stereo|FL=FL+0.707*FC+0.707*BL+0.5*LFE|FR=FR+0.707*FC+0.707*BR+0.5*LFE,' +
-            'aresample=async=1:first_pts=0';
-
         args.push(
             '-map', '0:v:0',
             '-map', '0:a:0?',
@@ -92,9 +86,9 @@ class LiveTranscodeSession {
             '-level', '4.1',
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
+            '-ac', '2',
             '-ar', '48000',
             '-b:a', '192k',
-            '-af', audioFilter,
             '-f', 'hls',
             '-hls_time', String(SEGMENT_DURATION),
             '-hls_list_size', '6',
