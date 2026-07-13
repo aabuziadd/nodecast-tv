@@ -1,16 +1,22 @@
 /**
- * share.html — play host's session m3u8 and seek to host playhead.
- * GET /api/watchparty/share already advances position while playing.
- *
- * Join lag (playlist/buffer load) is compensated when media is ready:
- * target = publishedPosition + (readyAt - fetchedAt).
- * Sub-second math already uses ms timestamps — microseconds wouldn't help.
+ * share.html — host session m3u8 + playhead sync.
+ * Custom controls: play/pause, volume, fullscreen, jump-to-live (no seek bar).
  */
 (function () {
     const video = document.getElementById('video');
     const offline = document.getElementById('offline');
+    const shell = document.getElementById('shell');
+    const controls = document.getElementById('controls');
+    const btnPlay = document.getElementById('btn-play');
+    const btnMute = document.getElementById('btn-mute');
+    const btnFs = document.getElementById('btn-fs');
+    const btnLive = document.getElementById('btn-live');
+    const volumeSlider = document.getElementById('volume');
+
     const POLL_MS = 2000;
     const SEEK_DRIFT_SEC = 5;
+    const LIVE_BEHIND_SEC = 6;
+    const CONTROLS_HIDE_MS = 2800;
 
     let hls = null;
     let currentUrl = null;
@@ -18,11 +24,14 @@
     let lastPosition = null;
     let hasJoined = false;
     let sharePlaying = true;
-    /** { position, fetchedAt } from last join/sync we intend to land on */
     let joinTarget = null;
+    let liveEdge = 0;
+    let liveEdgeAt = 0;
+    let hideControlsTimer = null;
 
     function setOffline(show) {
         offline.classList.toggle('hidden', !show);
+        controls.style.visibility = show ? 'hidden' : '';
     }
 
     function tryAutoplay() {
@@ -44,7 +53,18 @@
         return `${window.location.origin}${url}`;
     }
 
-    /** Position advanced by load time so we don't land behind existing viewers */
+    function setLiveEdge(position, playing) {
+        liveEdge = typeof position === 'number' ? position : 0;
+        liveEdgeAt = Date.now();
+        sharePlaying = playing !== false;
+        updateLiveButton();
+    }
+
+    function currentLiveEdge() {
+        if (!sharePlaying) return liveEdge;
+        return liveEdge + (Date.now() - liveEdgeAt) / 1000;
+    }
+
     function compensatedPosition(basePosition, fetchedAt, playing) {
         let t = basePosition;
         if (playing !== false && fetchedAt) {
@@ -69,13 +89,11 @@
             }
             lastPosition = t;
             tryAutoplay();
+            updateLiveButton();
         };
 
-        if (video.readyState >= 1) {
-            apply();
-        } else {
-            video.addEventListener('loadedmetadata', apply, { once: true });
-        }
+        if (video.readyState >= 1) apply();
+        else video.addEventListener('loadedmetadata', apply, { once: true });
     }
 
     function seekWhenReady(basePosition, fetchedAt, playing) {
@@ -94,10 +112,49 @@
             go();
             return;
         }
-
         const onReady = () => go();
         video.addEventListener('canplay', onReady, { once: true });
         video.addEventListener('loadedmetadata', onReady, { once: true });
+    }
+
+    function jumpToLive() {
+        const edge = currentLiveEdge();
+        const fetchedAt = Date.now();
+        joinTarget = { position: edge, fetchedAt, playing: sharePlaying };
+        seekToPosition(edge, { force: true });
+        tryAutoplay();
+        updateLiveButton();
+    }
+
+    function updateLiveButton() {
+        if (!hasJoined || !currentUrl || offline && !offline.classList.contains('hidden')) {
+            btnLive.classList.remove('visible');
+            return;
+        }
+        const behind = currentLiveEdge() - (video.currentTime || 0);
+        btnLive.classList.toggle('visible', behind > LIVE_BEHIND_SEC);
+    }
+
+    function updatePlayUi() {
+        controls.classList.toggle('playing', !video.paused);
+    }
+
+    function updateMuteUi() {
+        const muted = video.muted || video.volume === 0;
+        controls.classList.toggle('muted', muted);
+        if (volumeSlider) {
+            volumeSlider.value = muted ? 0 : Math.round(video.volume * 100);
+        }
+    }
+
+    function showControls() {
+        shell.classList.remove('controls-hidden');
+        clearTimeout(hideControlsTimer);
+        if (!video.paused) {
+            hideControlsTimer = setTimeout(() => {
+                shell.classList.add('controls-hidden');
+            }, CONTROLS_HIDE_MS);
+        }
     }
 
     function playUrl(url, position, playing) {
@@ -107,11 +164,11 @@
         const fetchedAt = Date.now();
         currentUrl = abs;
         hasJoined = true;
-        sharePlaying = playing !== false;
+        setLiveEdge(position, playing);
         destroyPlayer();
         setOffline(false);
+        showControls();
 
-        // Rough start; final seek happens when media is ready (with load compensation)
         const startPos = typeof position === 'number' && position > 0 ? position : -1;
 
         if (window.Hls && Hls.isSupported()) {
@@ -169,7 +226,9 @@
         const playing = state.playing !== false;
         const fetchedAt = Date.now();
 
-        // Same host snapshot — online viewers keep playing locally
+        // Always refresh live edge for the Live button (even if snapshot unchanged)
+        setLiveEdge(position, playing);
+
         if (updatedAt && updatedAt === lastUpdatedAt && hasJoined) {
             return;
         }
@@ -179,21 +238,16 @@
 
         lastUpdatedAt = updatedAt || Date.now();
         lastPosition = position;
-        sharePlaying = playing;
 
         if (urlChanged || isFirstJoin) {
             playUrl(state.url, position, playing);
             return;
         }
 
-        // Host seek / pause / resume — compensate if we still need a hard sync
         seekWhenReady(position, fetchedAt, playing);
 
-        if (!playing) {
-            video.pause();
-        } else {
-            tryAutoplay();
-        }
+        if (!playing) video.pause();
+        else tryAutoplay();
     }
 
     async function pollShare() {
@@ -206,6 +260,73 @@
         }
     }
 
+    // --- Custom controls (Owncast-style: no seek / no duration) ---
+    btnPlay?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (video.paused) tryAutoplay();
+        else video.pause();
+        showControls();
+    });
+
+    btnMute?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        video.muted = !video.muted;
+        if (!video.muted && video.volume === 0) video.volume = 0.8;
+        updateMuteUi();
+        showControls();
+    });
+
+    volumeSlider?.addEventListener('input', (e) => {
+        const v = Number(e.target.value) / 100;
+        video.volume = v;
+        video.muted = v === 0;
+        updateMuteUi();
+        showControls();
+    });
+
+    btnFs?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const el = shell;
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+            (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+        } else if (el.requestFullscreen) {
+            el.requestFullscreen().catch(() => {});
+        } else if (el.webkitRequestFullscreen) {
+            el.webkitRequestFullscreen();
+        } else if (video.webkitEnterFullscreen) {
+            video.webkitEnterFullscreen();
+        }
+        showControls();
+    });
+
+    btnLive?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        jumpToLive();
+        showControls();
+    });
+
+    shell?.addEventListener('mousemove', showControls);
+    shell?.addEventListener('touchstart', showControls, { passive: true });
+    shell?.addEventListener('click', (e) => {
+        if (e.target === video || e.target === shell) {
+            showControls();
+            if (video.paused) tryAutoplay();
+            else video.pause();
+        }
+    });
+
+    video.addEventListener('play', () => {
+        updatePlayUi();
+        showControls();
+    });
+    video.addEventListener('pause', () => {
+        updatePlayUi();
+        shell.classList.remove('controls-hidden');
+        clearTimeout(hideControlsTimer);
+    });
+    video.addEventListener('volumechange', updateMuteUi);
+    video.addEventListener('timeupdate', updateLiveButton);
+
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
             lastUpdatedAt = null;
@@ -216,6 +337,7 @@
 
     pollShare();
     setInterval(pollShare, POLL_MS);
+    setInterval(updateLiveButton, 1000);
 
     video.addEventListener('durationchange', () => {
         if (!joinTarget) return;
@@ -229,4 +351,8 @@
             seekToPosition(t, { force: true });
         }
     });
+
+    updatePlayUi();
+    updateMuteUi();
+    showControls();
 })();
