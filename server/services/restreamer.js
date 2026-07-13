@@ -4,137 +4,122 @@
 
 class RestreamerApi {
     constructor(baseUrl, username, password) {
-        this.baseUrl = baseUrl.replace(/\/+$/, '');
+        this.baseUrl = baseUrl.replace(/\/+$/, "");
         this.username = username;
         this.password = password;
 
         this.accessToken = null;
-        this.refreshToken = null;
     }
 
-
     async login() {
-        const response = await fetch(
-            `${this.baseUrl}/api/login`,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    username: this.username,
-                    password: this.password
-                })
-            }
-        );
-
+        const response = await fetch(`${this.baseUrl}/api/login`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                username: this.username,
+                password: this.password
+            })
+        });
 
         if (!response.ok) {
-            throw new Error(
-                `Restreamer login failed: ${response.status}`
-            );
+            throw new Error(`Restreamer login failed (${response.status})`);
         }
-
 
         const data = await response.json();
 
         this.accessToken = data.access_token;
-        this.refreshToken = data.refresh_token;
 
         return data;
     }
 
-
     async request(path, options = {}) {
-
         if (!this.accessToken) {
             await this.login();
         }
 
-
-        const response = await fetch(
-            `${this.baseUrl}${path}`,
-            {
-                ...options,
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization":
-                        `Bearer ${this.accessToken}`,
-                    ...(options.headers || {})
-                }
+        const response = await fetch(`${this.baseUrl}${path}`, {
+            ...options,
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${this.accessToken}`,
+                ...(options.headers || {})
             }
-        );
-
+        });
 
         if (response.status === 401) {
             await this.login();
             return this.request(path, options);
         }
 
-
         if (!response.ok) {
-            const body = await response.text();
-
             throw new Error(
-                `Restreamer API ${response.status}: ${body}`
+                `Restreamer API ${response.status}: ${await response.text()}`
             );
         }
 
+        if (response.status === 204) {
+            return true;
+        }
 
         return response.json();
     }
-
 
     async getInfo() {
         return this.request("/api/v3/config");
     }
 
-    async createProcess(sourceUrl) {
+    async getProcess(processId) {
+        return this.request(`/api/v3/process/${encodeURIComponent(processId)}`);
+    }
 
-        const processId = `watchparty-${Date.now()}`;
+    async updateSource(processId, sourceUrl) {
+        const process = await this.getProcess(processId);
 
-        const body = {
-            id: processId,
+        process.input[0].address = sourceUrl;
 
-            input: [
-                {
-                    id: "0",
-                    address: sourceUrl,
-                    options: []
-                }
-            ],
+        return this.request(
+            `/api/v3/process/${encodeURIComponent(processId)}`,
+            {
+                method: "PUT",
+                body: JSON.stringify(process.config)
+            }
+        );
+    }
 
-            output: [
-                {
-                    id: "0",
-                    address: "{memfs}/{processid}.m3u8",
-                    options: [
-                        "-c:v", "copy",
-                        "-c:a", "copy",
+    async startProcess(processId) {
+        return this.request(
+            `/api/v3/process/${encodeURIComponent(processId)}/command`,
+            {
+                method: "PUT",
+                body: JSON.stringify({
+                    command: "start"
+                })
+            }
+        );
+    }
 
-                        "-f", "hls",
+    async stopProcess(processId) {
+        return this.request(
+            `/api/v3/process/${encodeURIComponent(processId)}/command`,
+            {
+                method: "PUT",
+                body: JSON.stringify({
+                    command: "stop"
+                })
+            }
+        );
+    }
 
-                        "-hls_time", "4",
-                        "-hls_list_size", "6",
-                        "-hls_flags", "delete_segments"
-                    ]
-                }
-            ],
+    async switchSource(processId, sourceUrl) {
+        await this.stopProcess(processId);
+        await this.updateSource(processId, sourceUrl);
+        await this.startProcess(processId);
 
-            autostart: true,
-            reconnect: true,
-            reconnect_delay_seconds: 10,
-            stale_timeout_seconds: 30,
-            reference: "nodecast-watchparty"
-        };
-
-        return this.request("/api/v3/process", {
-            method: "POST",
-            body: JSON.stringify(body)
-        });
+        return true;
     }
 }
-
 
 function createRestreamer() {
     return new RestreamerApi(
@@ -143,7 +128,6 @@ function createRestreamer() {
         process.env.RESTREAMER_PASSWORD
     );
 }
-
 
 module.exports = {
     RestreamerApi,
