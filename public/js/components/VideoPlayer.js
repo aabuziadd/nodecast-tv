@@ -28,6 +28,7 @@ class VideoPlayer {
         this.isUsingProxy = false;
         this.currentUrl = null;
         this.sourceUrl = null; // original stream URL (for Share Live)
+        this.sessionSeekBase = 0; // absolute -ss used when opening a transcode session
         this.settingsLoaded = false;
 
         // Settings - start with defaults, load from server async
@@ -477,13 +478,17 @@ class VideoPlayer {
         if (btn) btn.textContent = 'Sharing…';
 
         try {
-            const seekOffset = Math.max(0, Math.floor(this.video?.currentTime || 0));
+            const seekOffset = Math.max(
+                0,
+                Math.floor((this.sessionSeekBase || 0) + (this.video?.currentTime || 0))
+            );
             await API.watchparty.publishShare(streamUrl, { seekOffset });
             if (btn) {
                 btn.textContent = '✓ Shared!';
                 setTimeout(() => { btn.innerHTML = shareLabel; }, 1500);
             }
-            console.log('[Player] Live share started from', streamUrl, 'at', seekOffset);
+            console.log('[Player] Live share started from', streamUrl, 'at', seekOffset,
+                `(base=${this.sessionSeekBase || 0}, t=${Math.floor(this.video?.currentTime || 0)})`);
         } catch (err) {
             console.error('[Player] Share Live failed:', err);
             if (btn) {
@@ -806,17 +811,20 @@ class VideoPlayer {
     async startTranscodeSession(url, options = {}) {
         try {
             console.log('[Player] Starting HLS transcode session...', options);
+            const seekBase = Number(options.seekOffset) || 0;
             const res = await fetch('/api/transcode/session', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url, ...options })
+                body: JSON.stringify({ url, ...options, seekOffset: seekBase })
             });
             if (!res.ok) throw new Error('Failed to start session');
             const session = await res.json();
             this.currentSessionId = session.sessionId;
+            this.sessionSeekBase = seekBase;
             return session.playlistUrl;
         } catch (err) {
             console.error('[Player] Session start failed:', err);
+            this.sessionSeekBase = 0;
             // Fallback to direct transcode if session fails
             return `/api/transcode?url=${encodeURIComponent(url)}`;
         }
@@ -836,6 +844,7 @@ class VideoPlayer {
             }
             this.currentSessionId = null;
         }
+        this.sessionSeekBase = 0;
     }
 
     /**
@@ -862,6 +871,7 @@ class VideoPlayer {
             // Determine if HLS or direct stream
             this.sourceUrl = streamUrl;
             this.currentUrl = streamUrl;
+            this.sessionSeekBase = 0;
 
             // CHECK: Auto Transcode (Smart) - probe first, then decide
             if (this.settings.autoTranscode) {

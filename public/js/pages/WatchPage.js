@@ -329,21 +329,27 @@ class WatchPage {
     async startTranscodeSession(url, options = {}) {
         try {
             console.log('[WatchPage] Starting HLS transcode session...', options);
+            const seekBase = Number(
+                options.seekOffset != null ? options.seekOffset : this.resumeTime
+            ) || 0;
             const res = await fetch('/api/transcode/session', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     url,
-                    seekOffset: this.resumeTime, // Pass resume point to backend
-                    ...options
+                    ...options,
+                    seekOffset: seekBase
                 })
             });
             if (!res.ok) throw new Error('Failed to start session');
             const session = await res.json();
             this.currentSessionId = session.sessionId;
+            // Playlist timelines restart at 0 after -ss — keep absolute base for Share Live
+            this.sessionSeekBase = seekBase;
             return session.playlistUrl;
         } catch (err) {
             console.error('[WatchPage] Session start failed:', err);
+            this.sessionSeekBase = 0;
             // Fallback to direct transcode if session fails
             return `/api/transcode?url=${encodeURIComponent(url)}`;
         }
@@ -362,6 +368,7 @@ class WatchPage {
                 console.error('Failed to stop session:', err);
             }
             this.currentSessionId = null;
+            this.sessionSeekBase = 0;
         }
     }
 
@@ -413,6 +420,7 @@ class WatchPage {
         // Original source URL for Share Live (currentUrl may become a playlist)
         this.sourceUrl = url;
         this.currentUrl = url;
+        this.sessionSeekBase = 0;
 
         // Stop any existing playback
         this.stop();
@@ -741,13 +749,18 @@ class WatchPage {
         if (btn) btn.textContent = 'Sharing…';
 
         try {
-            const seekOffset = Math.max(0, Math.floor(this.video?.currentTime || 0));
+            // Absolute source position: session -ss base + playlist-relative currentTime
+            const seekOffset = Math.max(
+                0,
+                Math.floor((this.sessionSeekBase || 0) + (this.video?.currentTime || 0))
+            );
             await API.watchparty.publishShare(streamUrl, { seekOffset });
             if (btn) {
                 btn.textContent = '✓ Shared!';
                 setTimeout(() => { btn.innerHTML = shareLabel; }, 1500);
             }
-            console.log('[WatchPage] Live share started from', streamUrl, 'at', seekOffset);
+            console.log('[WatchPage] Live share started from', streamUrl, 'at', seekOffset,
+                `(base=${this.sessionSeekBase || 0}, t=${Math.floor(this.video?.currentTime || 0)})`);
         } catch (err) {
             console.error('[WatchPage] Share Live failed:', err);
             if (btn) {
@@ -801,13 +814,19 @@ class WatchPage {
 
         // Handle resumption
         if (this.resumeTime > 0 && this.video) {
-            const duration = this.video.duration;
-            // Only resume if not near the end (95%)
-            if (!duration || this.resumeTime < duration * 0.95) {
-                console.log(`[WatchPage] Resuming at ${this.resumeTime}s`);
-                this.video.currentTime = this.resumeTime;
+            // If the transcode session already started with -ss, playlist time is relative
+            // to that point — don't also seek video.currentTime by the absolute resume.
+            if (this.sessionSeekBase > 0) {
+                this.resumeTime = 0;
+            } else {
+                const duration = this.video.duration;
+                // Only resume if not near the end (95%)
+                if (!duration || this.resumeTime < duration * 0.95) {
+                    console.log(`[WatchPage] Resuming at ${this.resumeTime}s`);
+                    this.video.currentTime = this.resumeTime;
+                }
+                this.resumeTime = 0; // Reset after use
             }
-            this.resumeTime = 0; // Reset after use
         }
     }
 
