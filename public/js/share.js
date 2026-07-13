@@ -33,13 +33,25 @@
         return `${window.location.origin}${url}`;
     }
 
-    function playUrl(url) {
+    /**
+     * @param {string} url
+     * @param {{ force?: boolean, cacheBust?: number }} [opts]
+     */
+    function playUrl(url, opts = {}) {
         const abs = toAbsolute(url);
-        if (!abs || abs === currentUrl) return;
+        if (!abs) return;
+
+        // Same fixed live.m3u8 alias — must still reload when Share Live is clicked again
+        if (!opts.force && abs === currentUrl) return;
 
         currentUrl = abs;
         destroyPlayer();
         setOffline(false);
+
+        // Bust caches / force hls.js to treat it as a new source
+        const source = opts.cacheBust
+            ? `${abs}${abs.includes('?') ? '&' : '?'}t=${opts.cacheBust}`
+            : abs;
 
         if (window.Hls && Hls.isSupported()) {
             hls = new Hls({
@@ -47,7 +59,7 @@
                 lowLatencyMode: true,
                 liveSyncDurationCount: 3
             });
-            hls.loadSource(abs);
+            hls.loadSource(source);
             hls.attachMedia(video);
             hls.on(Hls.Events.MANIFEST_PARSED, () => tryAutoplay());
             hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -60,7 +72,7 @@
         }
 
         if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = abs;
+            video.src = source;
             video.addEventListener('loadedmetadata', () => tryAutoplay(), { once: true });
             return;
         }
@@ -79,12 +91,21 @@
             return;
         }
 
-        if (state.updatedAt && state.updatedAt === lastUpdatedAt && toAbsolute(state.url) === currentUrl) {
+        const updatedAt = state.updatedAt || null;
+        const abs = toAbsolute(state.url);
+
+        // Unchanged share — keep playing
+        if (updatedAt && updatedAt === lastUpdatedAt && abs === currentUrl) {
             return;
         }
 
-        lastUpdatedAt = state.updatedAt || Date.now();
-        playUrl(state.url);
+        const isReshare = lastUpdatedAt != null && updatedAt !== lastUpdatedAt;
+        lastUpdatedAt = updatedAt || Date.now();
+
+        playUrl(state.url, {
+            force: isReshare || abs !== currentUrl,
+            cacheBust: updatedAt || Date.now()
+        });
     }
 
     async function pollShare() {
