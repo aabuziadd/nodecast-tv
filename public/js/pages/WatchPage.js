@@ -163,11 +163,11 @@ class WatchPage {
             overflowMenu?.classList.toggle('hidden');
         });
 
-        // Copy Stream URL
+        // Share Live
         const copyUrlBtn = document.getElementById('watch-copy-url');
         copyUrlBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.copyStreamUrl();
+            this.shareLive();
             overflowMenu?.classList.add('hidden');
         });
 
@@ -410,7 +410,8 @@ class WatchPage {
     }
 
     async loadVideo(url) {
-        // Store the URL for copy functionality
+        // Original source URL for Share Live (currentUrl may become a playlist)
+        this.sourceUrl = url;
         this.currentUrl = url;
 
         // Stop any existing playback
@@ -725,43 +726,34 @@ class WatchPage {
     }
 
     /**
-     * Copy current stream URL to clipboard
+     * Start a separate live HLS encode and publish it for share.html.
+     * Does not affect the host's normal VOD playback session.
      */
-    copyStreamUrl() {
-        if (!this.currentUrl) {
-            console.warn('[WatchPage] No stream URL to copy');
+    async shareLive() {
+        const streamUrl = this.sourceUrl || this.currentUrl;
+        if (!streamUrl) {
+            console.warn('[WatchPage] No stream URL to share');
             return;
         }
 
-        let streamUrl = this.currentUrl;
+        const shareLabel = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg> Share Live`;
+        const btn = document.getElementById('watch-copy-url');
+        if (btn) btn.textContent = 'Sharing…';
 
-        // If it's a relative URL, make it absolute
-        if (streamUrl.startsWith('/')) {
-            streamUrl = window.location.origin + streamUrl;
-        }
-
-        const showPromptFallback = () => {
-            prompt('Copy this URL:', streamUrl);
-        };
-
-        // navigator.clipboard is only available in secure contexts (HTTPS/localhost)
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(streamUrl).then(() => {
-                // Show brief feedback
-                const btn = document.getElementById('watch-copy-url');
-                if (btn) {
-                    btn.textContent = '✓ Copied!';
-                    setTimeout(() => {
-                        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg> Copy Stream URL`;
-                    }, 1500);
-                }
-                console.log('[WatchPage] Stream URL copied:', streamUrl);
-            }).catch(() => {
-                showPromptFallback();
-            });
-        } else {
-            // Fallback for insecure contexts (HTTP)
-            showPromptFallback();
+        try {
+            const seekOffset = Math.max(0, Math.floor(this.video?.currentTime || 0));
+            await API.watchparty.publishShare(streamUrl, { seekOffset });
+            if (btn) {
+                btn.textContent = '✓ Shared!';
+                setTimeout(() => { btn.innerHTML = shareLabel; }, 1500);
+            }
+            console.log('[WatchPage] Live share started from', streamUrl, 'at', seekOffset);
+        } catch (err) {
+            console.error('[WatchPage] Share Live failed:', err);
+            if (btn) {
+                btn.textContent = 'Share failed';
+                setTimeout(() => { btn.innerHTML = shareLabel; }, 2000);
+            }
         }
     }
 

@@ -166,6 +166,14 @@ const API = {
         create: (data) => API.request('POST', '/auth/users', data),
         update: (id, data) => API.request('PUT', `/auth/users/${id}`, data),
         delete: (id) => API.request('DELETE', `/auth/users/${id}`)
+    },
+
+    // Watchparty / live share
+    watchparty: {
+        start: (processId, url) => API.request('POST', '/watchparty/start', { processId, url }),
+        stop: (processId) => API.request('POST', '/watchparty/stop', { processId }),
+        publishShare: (url, extras = {}) => API.request('POST', '/watchparty/share', { url, ...extras }),
+        getShare: () => API.request('GET', '/watchparty/share')
     }
 };
 
