@@ -2,57 +2,49 @@ const express = require("express");
 const router = express.Router();
 
 const auth = require("../auth");
-const db = require("../db");
 const { createRestreamer } = require("../services/restreamer");
-const liveTranscode = require("../services/liveTranscodeSession");
 
-liveTranscode.startCleanupInterval();
-
-/** Published share state for share.html */
+/**
+ * Published share for share.html — host's existing playlist + playhead.
+ * No second FFmpeg / live session.
+ */
 let sharedState = {
     url: null,
+    position: 0,
+    playing: true,
     updatedAt: null,
     sessionId: null
 };
 
 /**
- * Start a separate live HLS encode and publish it for share.html.
- * Does not touch the host's normal VOD TranscodeSession.
+ * Publish the host playback URL (usually the normal transcode session m3u8)
+ * and current playhead for share.html to seek to.
  *
  * POST /api/watchparty/share
- * Body: { url, seekOffset? }
+ * Body: { url, position?, playing?, sessionId? }
  */
 router.post(
     "/share",
     auth.requireAuth,
-    async (req, res) => {
+    (req, res) => {
         try {
-            const { url, seekOffset } = req.body;
+            const { url, position, playing, sessionId } = req.body;
 
             if (!url) {
                 return res.status(400).json({ error: "url is required" });
             }
 
-            const settings = await db.settings.get();
-            const userAgent = db.getUserAgent(settings);
-            const ffmpegPath = req.app.locals.ffmpegPath || "ffmpeg";
-
-            const session = await liveTranscode.startShareSession(url, {
-                ffmpegPath,
-                userAgent,
-                seekOffset: typeof seekOffset === "number" ? seekOffset : 0
-            });
-
             sharedState = {
-                url: "/api/watchparty/live.m3u8",
+                url,
+                position: typeof position === "number" ? Math.max(0, position) : 0,
+                playing: playing !== false,
                 updatedAt: Date.now(),
-                sessionId: session.id
+                sessionId: sessionId || null
             };
 
             res.json({
                 success: true,
                 ...sharedState,
-                playlistUrl: sharedState.url,
                 sharePage: "/share.html"
             });
         } catch (err) {
@@ -63,58 +55,13 @@ router.post(
 );
 
 /**
- * Current share playlist pointer (public).
+ * Current share pointer (public).
  * GET /api/watchparty/share
  */
 router.get("/share", (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.json(sharedState);
-});
-
-/**
- * Fixed live HLS playlist for embeds.
- * GET /api/watchparty/live.m3u8
- */
-router.get("/live.m3u8", async (req, res) => {
-    const session = liveTranscode.getActiveLiveSession();
-    if (!session) {
-        return res.status(404).json({ error: "No live share session" });
-    }
-
-    const playlist = await session.getPlaylist();
-    if (!playlist) {
-        return res.status(404).json({ error: "Playlist not ready" });
-    }
-
-    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-    res.setHeader("Cache-Control", "no-cache, no-store");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.send(playlist);
-});
-
-/**
- * Live HLS segments.
- * GET /api/watchparty/seg0000.ts
- */
-router.get("/:segment", async (req, res, next) => {
-    const { segment } = req.params;
-    if (!segment.endsWith(".ts")) return next();
-
-    const session = liveTranscode.getActiveLiveSession();
-    if (!session) {
-        return res.status(404).json({ error: "No live share session" });
-    }
-
-    const segmentPath = await session.getSegment(segment);
-    if (!segmentPath) {
-        return res.status(404).json({ error: "Segment not found" });
-    }
-
-    res.setHeader("Content-Type", "video/MP2T");
-    res.setHeader("Cache-Control", "public, max-age=60");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.sendFile(segmentPath);
 });
 
 // --- Restreamer ---

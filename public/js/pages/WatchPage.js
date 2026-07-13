@@ -734,12 +734,18 @@ class WatchPage {
     }
 
     /**
-     * Start a separate live HLS encode and publish it for share.html.
-     * Does not affect the host's normal VOD playback session.
+     * Publish the host's current playlist + playhead for share.html.
+     * Uses the existing transcode session (1 FFmpeg) — no second live encode.
      */
     async shareLive() {
-        const streamUrl = this.sourceUrl || this.currentUrl;
-        if (!streamUrl) {
+        let playlistUrl = null;
+        if (this.currentSessionId) {
+            playlistUrl = `/api/transcode/${this.currentSessionId}/stream.m3u8`;
+        } else {
+            playlistUrl = this.currentUrl || this.sourceUrl;
+        }
+
+        if (!playlistUrl) {
             console.warn('[WatchPage] No stream URL to share');
             return;
         }
@@ -749,18 +755,18 @@ class WatchPage {
         if (btn) btn.textContent = 'Sharing…';
 
         try {
-            // Absolute source position: session -ss base + playlist-relative currentTime
-            const seekOffset = Math.max(
-                0,
-                Math.floor((this.sessionSeekBase || 0) + (this.video?.currentTime || 0))
-            );
-            await API.watchparty.publishShare(streamUrl, { seekOffset });
+            // Playlist-relative playhead (session -ss already baked into the m3u8)
+            const position = Math.max(0, Math.floor(this.video?.currentTime || 0));
+            await API.watchparty.publishShare(playlistUrl, {
+                position,
+                playing: !this.video?.paused,
+                sessionId: this.currentSessionId || null
+            });
             if (btn) {
                 btn.textContent = '✓ Shared!';
                 setTimeout(() => { btn.innerHTML = shareLabel; }, 1500);
             }
-            console.log('[WatchPage] Live share started from', streamUrl, 'at', seekOffset,
-                `(base=${this.sessionSeekBase || 0}, t=${Math.floor(this.video?.currentTime || 0)})`);
+            console.log('[WatchPage] Shared host playlist', playlistUrl, 'at', position);
         } catch (err) {
             console.error('[WatchPage] Share Live failed:', err);
             if (btn) {

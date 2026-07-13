@@ -1,5 +1,6 @@
 /**
- * share.html — native autoplay player for /api/watchparty/live.m3u8
+ * share.html — play host's session m3u8 and seek to host playhead.
+ * One host FFmpeg/session; no separate live encode.
  */
 (function () {
     const video = document.getElementById('video');
@@ -9,6 +10,7 @@
     let hls = null;
     let currentUrl = null;
     let lastUpdatedAt = null;
+    let lastPosition = null;
 
     function setOffline(show) {
         offline.classList.toggle('hidden', !show);
@@ -33,37 +35,57 @@
         return `${window.location.origin}${url}`;
     }
 
-    /**
-     * @param {string} url
-     * @param {{ force?: boolean, cacheBust?: number }} [opts]
-     */
-    function playUrl(url, opts = {}) {
+    function seekToPosition(position) {
+        if (typeof position !== 'number' || position < 0 || !isFinite(position)) return;
+
+        const apply = () => {
+            const duration = video.duration;
+            let t = position;
+            if (isFinite(duration) && duration > 0) {
+                t = Math.min(position, Math.max(0, duration - 0.25));
+            }
+            if (Math.abs((video.currentTime || 0) - t) > 1) {
+                video.currentTime = t;
+            }
+            tryAutoplay();
+        };
+
+        if (video.readyState >= 1) {
+            apply();
+        } else {
+            video.addEventListener('loadedmetadata', apply, { once: true });
+        }
+    }
+
+    function playUrl(url, position) {
         const abs = toAbsolute(url);
         if (!abs) return;
-
-        // Same fixed live.m3u8 alias — must still reload when Share Live is clicked again
-        if (!opts.force && abs === currentUrl) return;
 
         currentUrl = abs;
         destroyPlayer();
         setOffline(false);
 
-        // Bust caches / force hls.js to treat it as a new source
-        const source = opts.cacheBust
-            ? `${abs}${abs.includes('?') ? '&' : '?'}t=${opts.cacheBust}`
-            : abs;
+        const startPos = typeof position === 'number' && position > 0 ? position : -1;
 
         if (window.Hls && Hls.isSupported()) {
             hls = new Hls({
                 enableWorker: true,
-                lowLatencyMode: true,
-                liveSyncDurationCount: 3
+                startPosition: startPos,
+                // VOD session playlists grow; don't treat as low-latency live
+                lowLatencyMode: false
             });
-            hls.loadSource(source);
+            hls.loadSource(abs);
             hls.attachMedia(video);
-            hls.on(Hls.Events.MANIFEST_PARSED, () => tryAutoplay());
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                seekToPosition(position);
+            });
             hls.on(Hls.Events.ERROR, (_e, data) => {
                 if (!data.fatal) return;
+                // Growing VOD playlist may 404 briefly — retry
+                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                    hls.startLoad();
+                    return;
+                }
                 destroyPlayer();
                 currentUrl = null;
                 setOffline(true);
@@ -71,9 +93,9 @@
             return;
         }
 
-        if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = source;
-            video.addEventListener('loadedmetadata', () => tryAutoplay(), { once: true });
+        if (video.canPlayType('application/vnd.apple.mpegurl') || abs.includes('.mp4') || abs.includes('/remux')) {
+            video.src = abs;
+            video.addEventListener('loadedmetadata', () => seekToPosition(position), { once: true });
             return;
         }
 
@@ -83,6 +105,7 @@
     function applyShareState(state) {
         if (!state || !state.url) {
             lastUpdatedAt = state?.updatedAt || null;
+            lastPosition = null;
             if (currentUrl) {
                 destroyPlayer();
                 currentUrl = null;
@@ -93,19 +116,35 @@
 
         const updatedAt = state.updatedAt || null;
         const abs = toAbsolute(state.url);
+        const position = typeof state.position === 'number' ? state.position : 0;
 
-        // Unchanged share — keep playing
-        if (updatedAt && updatedAt === lastUpdatedAt && abs === currentUrl) {
+        // Same publish — nothing to do
+        if (updatedAt && updatedAt === lastUpdatedAt) {
             return;
         }
 
-        const isReshare = lastUpdatedAt != null && updatedAt !== lastUpdatedAt;
-        lastUpdatedAt = updatedAt || Date.now();
+        const urlChanged = abs !== currentUrl;
+        const positionChanged =
+            lastPosition == null || Math.abs(position - lastPosition) > 1;
 
-        playUrl(state.url, {
-            force: isReshare || abs !== currentUrl,
-            cacheBust: updatedAt || Date.now()
-        });
+        lastUpdatedAt = updatedAt || Date.now();
+        lastPosition = position;
+
+        if (urlChanged || !currentUrl) {
+            playUrl(state.url, position);
+            return;
+        }
+
+        // Same host playlist — just jump to new playhead (re-Share Live)
+        if (positionChanged) {
+            seekToPosition(position);
+        }
+
+        if (state.playing === false) {
+            video.pause();
+        } else {
+            tryAutoplay();
+        }
     }
 
     async function pollShare() {
@@ -127,4 +166,13 @@
 
     pollShare();
     setInterval(pollShare, POLL_MS);
+
+    // Host VOD playlist grows — retry seek once duration catches the published position
+    video.addEventListener('durationchange', () => {
+        if (lastPosition == null) return;
+        if (!isFinite(video.duration) || video.duration < lastPosition) return;
+        if (Math.abs((video.currentTime || 0) - lastPosition) > 2) {
+            seekToPosition(lastPosition);
+        }
+    });
 })();
