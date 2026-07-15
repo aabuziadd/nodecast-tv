@@ -4,19 +4,32 @@ const router = express.Router();
 const auth = require("../auth");
 const { createRestreamer } = require("../services/restreamer");
 
+const DEFAULT_ROOM = "default";
+const ROOM_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const sharedStates = new Map();
+
+function normalizeRoom(value) {
+    const room = String(value || DEFAULT_ROOM).trim();
+    return ROOM_PATTERN.test(room) ? room : null;
+}
+
+function emptyShareState(room) {
+    return {
+        room,
+        url: null,
+        position: 0,
+        playing: true,
+        updatedAt: null,
+        sessionId: null
+    };
+}
+
 /**
- * Published share for share.html — host's existing playlist + playhead.
+ * Published shares for share.html, keyed by room.
  * position/updatedAt are a snapshot; GET extrapolates while playing.
  */
-let sharedState = {
-    url: null,
-    position: 0,
-    playing: true,
-    updatedAt: null,
-    sessionId: null
-};
-
-function getLiveShareState() {
+function getLiveShareState(room) {
+    const sharedState = sharedStates.get(room) || emptyShareState(room);
     if (!sharedState.url || sharedState.updatedAt == null) {
         return { ...sharedState };
     }
@@ -38,7 +51,7 @@ function getLiveShareState() {
  * and current playhead for share.html to seek to.
  *
  * POST /api/watchparty/share
- * Body: { url, position?, playing?, sessionId? }
+ * Body: { url, position?, playing?, sessionId?, room? }
  */
 router.post(
     "/share",
@@ -46,23 +59,29 @@ router.post(
     (req, res) => {
         try {
             const { url, position, playing, sessionId } = req.body;
+            const room = normalizeRoom(req.body.room);
 
             if (!url) {
                 return res.status(400).json({ error: "url is required" });
             }
 
-            sharedState = {
+            if (!room) {
+                return res.status(400).json({ error: "invalid room" });
+            }
+
+            sharedStates.set(room, {
+                room,
                 url,
                 position: typeof position === "number" ? Math.max(0, position) : 0,
                 playing: playing !== false,
                 updatedAt: Date.now(),
                 sessionId: sessionId || null
-            };
+            });
 
             res.json({
                 success: true,
-                ...getLiveShareState(),
-                sharePage: "/share.html"
+                ...getLiveShareState(room),
+                sharePage: `/share.html?room=${encodeURIComponent(room)}`
             });
         } catch (err) {
             console.error("Watchparty share error:", err);
@@ -77,9 +96,14 @@ router.post(
  * GET /api/watchparty/share
  */
 router.get("/share", (req, res) => {
+    const room = normalizeRoom(req.query.room);
+    if (!room) {
+        return res.status(400).json({ error: "invalid room" });
+    }
+
     res.setHeader("Cache-Control", "no-cache, no-store");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.json(getLiveShareState());
+    res.json(getLiveShareState(room));
 });
 
 // --- Restreamer ---

@@ -1111,13 +1111,27 @@
   <script src="/js/pages/WatchPage.js?v=1"></script>
   <script src="/js/app.js?v=4"></script>
   <script>
-    // Check for SSO token in URL
+    // Capture SSO token and room context before the app initializes.
     (function () {
       const urlParams = new URLSearchParams(window.location.search);
       const token = urlParams.get('token');
+      const requestedRoom = urlParams.get('room');
+      const validRoom = requestedRoom && /^[A-Za-z0-9_-]{1,64}$/.test(requestedRoom)
+        ? requestedRoom
+        : null;
+
       if (token) {
         console.log('SSO Login successful, saving token...');
         localStorage.setItem('authToken', token);
+      }
+
+      if (requestedRoom !== null) {
+        sessionStorage.setItem('nodecastRoom', validRoom || 'default');
+      }
+
+      window.NodecastShareRoom = sessionStorage.getItem('nodecastRoom') || 'default';
+
+      if (token || requestedRoom !== null) {
         // Clean URL without reloading
         const newUrl = window.location.pathname;
         window.history.replaceState({}, document.title, newUrl);

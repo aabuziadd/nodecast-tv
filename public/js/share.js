@@ -17,6 +17,9 @@
     const SEEK_DRIFT_SEC = 5;
     const LIVE_BEHIND_SEC = 6;
     const CONTROLS_HIDE_MS = 2800;
+    const ROOM_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+    const requestedRoom = new URLSearchParams(window.location.search).get('room') || 'default';
+    const room = ROOM_PATTERN.test(requestedRoom) ? requestedRoom : 'default';
 
     let hls = null;
     let currentUrl = null;
@@ -252,7 +255,9 @@
 
     async function pollShare() {
         try {
-            const res = await fetch('/api/watchparty/share', { cache: 'no-store' });
+            const res = await fetch(`/api/watchparty/share?room=${encodeURIComponent(room)}`, {
+                cache: 'no-store'
+            });
             if (!res.ok) throw new Error('poll failed');
             applyShareState(await res.json());
         } catch {

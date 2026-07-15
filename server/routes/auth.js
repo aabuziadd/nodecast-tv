@@ -3,6 +3,14 @@ const router = express.Router();
 const db = require('../db');
 const auth = require('../auth');
 
+const DEFAULT_ROOM = 'default';
+const ROOM_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+function normalizeRoom(value) {
+    const room = String(value || DEFAULT_ROOM).trim();
+    return ROOM_PATTERN.test(room) ? room : null;
+}
+
 // Configure Passport strategies
 auth.configureLocalStrategy(
     async (username) => await db.users.getByUsername(username),
@@ -29,7 +37,18 @@ auth.configureOidcStrategy(
  * Start OIDC Login
  * GET /api/auth/oidc/login
  */
-router.get('/oidc/login', auth.passport.authenticate('openidconnect'));
+router.get(
+    '/oidc/login',
+    (req, res, next) => {
+        const room = normalizeRoom(req.query.room);
+        if (!room) {
+            return res.status(400).json({ error: 'Invalid room' });
+        }
+        req.session.nodecastRoom = room;
+        next();
+    },
+    auth.passport.authenticate('openidconnect')
+);
 
 /**
  * OIDC Callback
@@ -40,9 +59,13 @@ router.get('/oidc/callback',
     (req, res) => {
         // Successful authentication
         const token = auth.generateToken(req.user);
+        const room = normalizeRoom(req.session?.nodecastRoom) || DEFAULT_ROOM;
+        if (req.session) {
+            delete req.session.nodecastRoom;
+        }
 
-        // Redirect to hompage with token
-        res.redirect(`/?token=${token}`);
+        // Preserve the selected TV room through the OIDC round trip.
+        res.redirect(`/?token=${encodeURIComponent(token)}&room=${encodeURIComponent(room)}`);
     }
 );
 

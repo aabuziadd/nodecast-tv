@@ -173,7 +173,10 @@ const API = {
         start: (processId, url) => API.request('POST', '/watchparty/start', { processId, url }),
         stop: (processId) => API.request('POST', '/watchparty/stop', { processId }),
         publishShare: (url, extras = {}) => API.request('POST', '/watchparty/share', { url, ...extras }),
-        getShare: () => API.request('GET', '/watchparty/share')
+        getShare: (room = 'default') => API.request(
+            'GET',
+            `/watchparty/share?room=${encodeURIComponent(room)}`
+        )
     }
 };
 

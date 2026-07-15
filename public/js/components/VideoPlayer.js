@@ -516,7 +516,8 @@ class VideoPlayer {
         await API.watchparty.publishShare(this.sharePlaylistUrl, {
             position: Math.max(0, this.video?.currentTime || 0),
             playing: !this.video?.paused,
-            sessionId: this.currentSessionId || null
+            sessionId: this.currentSessionId || null,
+            room: window.NodecastShareRoom || 'default'
         });
     }
 
