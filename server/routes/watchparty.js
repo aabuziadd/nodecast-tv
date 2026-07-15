@@ -47,11 +47,20 @@ function getLiveShareState(room) {
 }
 
 /**
+ * Clear a room's published share so share.html shows Offline.
+ */
+function clearShareState(room) {
+    sharedStates.delete(room);
+    return emptyShareState(room);
+}
+
+/**
  * Publish the host playback URL (usually the normal transcode session m3u8)
  * and current playhead for share.html to seek to.
  *
  * POST /api/watchparty/share
  * Body: { url, position?, playing?, sessionId?, room? }
+ * Clear: { clear: true, room? } or { url: null, room? }
  */
 router.post(
     "/share",
@@ -60,13 +69,24 @@ router.post(
         try {
             const { url, position, playing, sessionId } = req.body;
             const room = normalizeRoom(req.body.room);
-
-            if (!url) {
-                return res.status(400).json({ error: "url is required" });
-            }
+            const clear =
+                req.body.clear === true || url === null || url === "";
 
             if (!room) {
                 return res.status(400).json({ error: "invalid room" });
+            }
+
+            if (clear) {
+                const cleared = clearShareState(room);
+                return res.json({
+                    success: true,
+                    ...cleared,
+                    sharePage: `/share.html?room=${encodeURIComponent(room)}`
+                });
+            }
+
+            if (!url) {
+                return res.status(400).json({ error: "url is required" });
             }
 
             sharedStates.set(room, {

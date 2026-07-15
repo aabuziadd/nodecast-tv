@@ -794,8 +794,15 @@ class WatchPage {
     }
 
     stopSharePositionSync() {
+        const wasSharing = this._shareSync;
+        const room = window.NodecastShareRoom || 'default';
         this._shareSync = false;
         this.sharePlaylistUrl = null;
+        if (wasSharing) {
+            API.watchparty.clearShare(room).catch((err) => {
+                console.warn('[WatchPage] Failed to clear share state:', err);
+            });
+        }
     }
 
     // === UI Updates ===
@@ -879,6 +886,9 @@ class WatchPage {
     }
 
     onEnded() {
+        // Share viewers should go Offline when the host video finishes.
+        this.stopSharePositionSync();
+
         // For series, show next episode panel if not already showing and auto-play is enabled
         const autoPlayEnabled = this.app?.player?.settings?.autoPlayNextEpisode;
         if (autoPlayEnabled && this.contentType === 'series' && this.seriesInfo && !this.nextEpisodeShowing) {

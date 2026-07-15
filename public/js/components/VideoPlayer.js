@@ -264,6 +264,9 @@ class VideoPlayer {
         this.video.addEventListener('seeked', () => {
             if (this._shareSync) this.publishSharePosition().catch(() => {});
         });
+        this.video.addEventListener('ended', () => {
+            this.stopSharePositionSync();
+        });
 
         // Loading spinner
         this.video.addEventListener('waiting', () => {
@@ -522,8 +525,15 @@ class VideoPlayer {
     }
 
     stopSharePositionSync() {
+        const wasSharing = this._shareSync;
+        const room = window.NodecastShareRoom || 'default';
         this._shareSync = false;
         this.sharePlaylistUrl = null;
+        if (wasSharing) {
+            API.watchparty.clearShare(room).catch((err) => {
+                console.warn('[Player] Failed to clear share state:', err);
+            });
+        }
     }
 
 
