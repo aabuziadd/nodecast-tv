@@ -441,7 +441,8 @@ h4 {
   position: absolute;
   left: 0;
   top: calc(var(--navbar-height) + var(--space-md));
-  z-index: 50;
+  /* Above player + channel toggle so it stays clickable when sidebar is tucked */
+  z-index: 110;
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
   border: 1px solid var(--glass-border);
@@ -453,6 +454,8 @@ h4 {
   transition: opacity 0.3s ease, background var(--transition-fast);
   opacity: 0;
   pointer-events: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .sidebar-expand-btn:hover {
@@ -467,12 +470,14 @@ h4 {
 /* Show expand button when sidebar is collapsed */
 .home-layout.sidebar-collapsed .sidebar-expand-btn {
   display: flex;
+  /* Always accept clicks while collapsed — don't wait for player overlay .visible */
+  pointer-events: auto;
+  opacity: 0.55;
 }
 
-/* Fade in expand button with player controls */
+/* Full opacity when player controls are showing */
 .home-layout.sidebar-collapsed .sidebar-expand-btn.visible {
   opacity: 1;
-  pointer-events: auto;
 }
 
 /* Hide expand button on mobile - mobile uses the floating toggle instead */

@@ -122,37 +122,60 @@ class App {
             });
         }
 
-        // Desktop sidebar collapse toggle
+        // Desktop sidebar collapse / expand
         const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
         const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
 
-        const toggleSidebarCollapse = () => {
-            // Collapse is desktop-only; ignore in drawer viewports
-            if (isDrawerViewport()) return;
-
-            channelSidebar?.classList.toggle('collapsed');
-            homeLayout?.classList.toggle('sidebar-collapsed');
-
-            const isCollapsed = channelSidebar?.classList.contains('collapsed');
-            localStorage.setItem('sidebarCollapsed', isCollapsed ? 'true' : 'false');
+        const setSidebarCollapsed = (collapsed) => {
+            channelSidebar?.classList.toggle('collapsed', collapsed);
+            homeLayout?.classList.toggle('sidebar-collapsed', collapsed);
+            localStorage.setItem('sidebarCollapsed', collapsed ? 'true' : 'false');
+            // Keep expand control clickable whenever the sidebar is tucked away
+            if (collapsed) {
+                sidebarExpandBtn?.classList.add('visible');
+            } else {
+                sidebarExpandBtn?.classList.remove('visible');
+            }
         };
 
-        sidebarCollapseBtn?.addEventListener('click', toggleSidebarCollapse);
-        sidebarExpandBtn?.addEventListener('click', toggleSidebarCollapse);
+        const collapseSidebar = () => {
+            // Collapse is a desktop layout feature; drawer mode uses the Channels button
+            if (isDrawerViewport()) return;
+            setSidebarCollapsed(true);
+        };
+
+        const expandSidebar = () => {
+            // Always allow expand — leftover collapsed state must be clearable
+            setSidebarCollapsed(false);
+        };
+
+        sidebarCollapseBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            collapseSidebar();
+        });
+        sidebarExpandBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            expandSidebar();
+        });
 
         const applySidebarCollapsePreference = () => {
             if (isDrawerViewport()) {
                 clearDesktopCollapseForDrawer();
+                sidebarExpandBtn?.classList.remove('visible');
                 return;
             }
-            if (localStorage.getItem('sidebarCollapsed') === 'true') {
-                channelSidebar?.classList.add('collapsed');
-                homeLayout?.classList.add('sidebar-collapsed');
-            }
+            const shouldCollapse = localStorage.getItem('sidebarCollapsed') === 'true';
+            setSidebarCollapsed(shouldCollapse);
         };
 
         applySidebarCollapsePreference();
-        drawerMq.addEventListener('change', applySidebarCollapsePreference);
+        if (drawerMq.addEventListener) {
+            drawerMq.addEventListener('change', applySidebarCollapsePreference);
+        } else if (drawerMq.addListener) {
+            drawerMq.addListener(applySidebarCollapsePreference);
+        }
 
         // Navigation handling
         document.querySelectorAll('.nav-link').forEach(link => {
