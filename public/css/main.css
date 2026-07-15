@@ -401,8 +401,8 @@ h4 {
 }
 
 .sidebar-collapse-btn {
-  display: none;
-  /* Hidden on mobile */
+  /* Hidden by default — .btn { display:inline-flex } would otherwise win */
+  display: none !important;
   flex-shrink: 0;
   padding: var(--space-xs);
 }
@@ -411,10 +411,17 @@ h4 {
   transition: transform 0.2s ease;
 }
 
-/* Desktop collapse button visibility */
+/* Desktop: collapse the docked sidebar */
 @media (min-width: 769px) {
   .sidebar-collapse-btn {
-    display: flex;
+    display: inline-flex !important;
+  }
+}
+
+/* Mobile / narrow embed: same control closes the channel drawer */
+@media (max-width: 768px) {
+  .channel-sidebar.active .sidebar-collapse-btn {
+    display: inline-flex !important;
   }
 }
 
