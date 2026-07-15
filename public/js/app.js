@@ -57,28 +57,67 @@ class App {
             });
         }
 
-        // Channel drawer toggle (mobile)
+        // Channel drawer toggle (mobile / narrow embed)
         const channelToggleBtn = document.getElementById('channel-toggle-btn');
         const channelSidebar = document.getElementById('channel-sidebar');
         const channelOverlay = document.getElementById('channel-sidebar-overlay');
+        const homeLayout = document.querySelector('.home-layout');
+        const drawerMq = window.matchMedia('(max-width: 768px)');
+        let drawerLockUntil = 0;
+
+        const isDrawerViewport = () => drawerMq.matches;
+
+        const clearDesktopCollapseForDrawer = () => {
+            // Desktop "collapsed" (width:0) must not apply in drawer mode
+            channelSidebar?.classList.remove('collapsed');
+            homeLayout?.classList.remove('sidebar-collapsed');
+        };
+
+        const openChannelDrawer = () => {
+            if (isDrawerViewport()) clearDesktopCollapseForDrawer();
+            channelSidebar?.classList.add('active');
+            channelOverlay?.classList.add('active');
+            // Ignore the same tap / ghost click that would immediately close
+            drawerLockUntil = Date.now() + 400;
+            if (channelOverlay) channelOverlay.style.pointerEvents = 'none';
+            setTimeout(() => {
+                if (channelOverlay?.classList.contains('active')) {
+                    channelOverlay.style.pointerEvents = '';
+                }
+            }, 400);
+        };
+
+        const closeChannelDrawer = () => {
+            channelSidebar?.classList.remove('active');
+            channelOverlay?.classList.remove('active');
+            if (channelOverlay) channelOverlay.style.pointerEvents = '';
+        };
 
         if (channelToggleBtn && channelSidebar && channelOverlay) {
-            const toggleChannelDrawer = () => {
-                channelSidebar.classList.toggle('active');
-                channelOverlay.classList.toggle('active');
-            };
+            channelToggleBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (Date.now() < drawerLockUntil) return;
 
-            channelToggleBtn.addEventListener('click', toggleChannelDrawer);
-            channelOverlay.addEventListener('click', toggleChannelDrawer);
+                if (channelSidebar.classList.contains('active')) {
+                    closeChannelDrawer();
+                } else {
+                    openChannelDrawer();
+                }
+            });
+
+            // Overlay only closes — never toggles open (avoids open→instant-close races)
+            channelOverlay.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (Date.now() < drawerLockUntil) return;
+                closeChannelDrawer();
+            });
 
             // Close drawer when a channel is selected
             channelSidebar.addEventListener('click', (e) => {
                 if (e.target.closest('.channel-item')) {
-                    // Small delay to let the channel selection happen
-                    setTimeout(() => {
-                        channelSidebar.classList.remove('active');
-                        channelOverlay.classList.remove('active');
-                    }, 300);
+                    setTimeout(() => closeChannelDrawer(), 300);
                 }
             });
         }
@@ -86,13 +125,14 @@ class App {
         // Desktop sidebar collapse toggle
         const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
         const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
-        const homeLayout = document.querySelector('.home-layout');
 
         const toggleSidebarCollapse = () => {
+            // Collapse is desktop-only; ignore in drawer viewports
+            if (isDrawerViewport()) return;
+
             channelSidebar?.classList.toggle('collapsed');
             homeLayout?.classList.toggle('sidebar-collapsed');
 
-            // Persist preference
             const isCollapsed = channelSidebar?.classList.contains('collapsed');
             localStorage.setItem('sidebarCollapsed', isCollapsed ? 'true' : 'false');
         };
@@ -100,11 +140,19 @@ class App {
         sidebarCollapseBtn?.addEventListener('click', toggleSidebarCollapse);
         sidebarExpandBtn?.addEventListener('click', toggleSidebarCollapse);
 
-        // Restore sidebar state from localStorage
-        if (localStorage.getItem('sidebarCollapsed') === 'true') {
-            channelSidebar?.classList.add('collapsed');
-            homeLayout?.classList.add('sidebar-collapsed');
-        }
+        const applySidebarCollapsePreference = () => {
+            if (isDrawerViewport()) {
+                clearDesktopCollapseForDrawer();
+                return;
+            }
+            if (localStorage.getItem('sidebarCollapsed') === 'true') {
+                channelSidebar?.classList.add('collapsed');
+                homeLayout?.classList.add('sidebar-collapsed');
+            }
+        };
+
+        applySidebarCollapsePreference();
+        drawerMq.addEventListener('change', applySidebarCollapsePreference);
 
         // Navigation handling
         document.querySelectorAll('.nav-link').forEach(link => {

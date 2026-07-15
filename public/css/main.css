@@ -341,7 +341,8 @@ h4 {
   position: absolute;
   top: var(--space-md);
   left: var(--space-md);
-  z-index: 60;
+  /* Above player controls; overlay sits under sidebar but can cover this when open */
+  z-index: 100;
   padding: var(--space-sm) var(--space-md);
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
@@ -354,6 +355,9 @@ h4 {
   transition: all var(--transition-fast);
   align-items: center;
   gap: var(--space-sm);
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .channel-toggle-btn:hover {
@@ -414,18 +418,21 @@ h4 {
   }
 }
 
-/* Collapsed sidebar state (desktop only) */
-.channel-sidebar.collapsed {
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
-  border-right: none;
-}
+/* Collapsed sidebar state — desktop only.
+   Must NOT apply in drawer mode (≤768px) or the drawer opens at width:0. */
+@media (min-width: 769px) {
+  .channel-sidebar.collapsed {
+    width: 0;
+    min-width: 0;
+    overflow: hidden;
+    border-right: none;
+  }
 
-.channel-sidebar.collapsed .sidebar-header,
-.channel-sidebar.collapsed .channel-list {
-  opacity: 0;
-  visibility: hidden;
+  .channel-sidebar.collapsed .sidebar-header,
+  .channel-sidebar.collapsed .channel-list {
+    opacity: 0;
+    visibility: hidden;
+  }
 }
 
 /* Expand button when sidebar is collapsed */
@@ -2036,18 +2043,28 @@ kbd {
     left: 0;
     bottom: 0;
     width: var(--sidebar-width);
+    min-width: 0;
     height: auto;
     border-right: 1px solid var(--color-border);
     border-bottom: none;
     transform: translateX(-100%);
     transition: transform 0.3s ease;
-    z-index: 90;
+    z-index: 95;
     box-shadow: var(--shadow-lg);
     visibility: hidden;
+    overflow: hidden;
+    opacity: 1;
   }
 
   .channel-sidebar.active {
     transform: translateX(0);
+    visibility: visible;
+  }
+
+  /* Ensure drawer content is visible even if desktop collapse classes linger */
+  .channel-sidebar .sidebar-header,
+  .channel-sidebar .channel-list {
+    opacity: 1;
     visibility: visible;
   }
 
@@ -2060,14 +2077,16 @@ kbd {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 80;
+    z-index: 90;
     opacity: 0;
     transition: opacity 0.3s ease;
+    pointer-events: none;
   }
 
   .channel-sidebar-overlay.active {
     display: block;
     opacity: 1;
+    pointer-events: auto;
   }
 
   /* Video player takes full width */
