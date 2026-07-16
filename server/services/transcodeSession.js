@@ -668,6 +668,35 @@ function getSession(sessionId) {
 }
 
 /**
+ * True if a session exists (does not touch lastAccess — safe for status checks).
+ */
+function hasSession(sessionId) {
+    return sessions.has(sessionId);
+}
+
+const sessionRemovedListeners = [];
+
+/**
+ * Register a callback invoked after a session is removed (cleanup / delete).
+ * Used by watchparty to clear stale share pointers.
+ */
+function onSessionRemoved(listener) {
+    if (typeof listener === 'function') {
+        sessionRemovedListeners.push(listener);
+    }
+}
+
+function notifySessionRemoved(sessionId) {
+    for (const listener of sessionRemovedListeners) {
+        try {
+            listener(sessionId);
+        } catch (err) {
+            console.warn('[TranscodeSession] onSessionRemoved listener failed:', err.message);
+        }
+    }
+}
+
+/**
  * Get or create a session for a URL (reuses existing if still valid)
  */
 async function getOrCreateSession(url, options = {}) {
@@ -690,6 +719,7 @@ async function removeSession(sessionId) {
     if (session) {
         await session.cleanup();
         sessions.delete(sessionId);
+        notifySessionRemoved(sessionId);
     }
 }
 
@@ -761,8 +791,10 @@ module.exports = {
     TranscodeSession,
     createSession,
     getSession,
+    hasSession,
     getOrCreateSession,
     removeSession,
+    onSessionRemoved,
     cleanupStaleSessions,
     recoverSessions,
     startCleanupInterval,

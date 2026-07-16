@@ -3,9 +3,11 @@ const router = express.Router();
 
 const auth = require("../auth");
 const { createRestreamer } = require("../services/restreamer");
+const transcodeSession = require("../services/transcodeSession");
 
 const DEFAULT_ROOM = "default";
 const ROOM_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const TRANSCODE_SESSION_RE = /\/api\/transcode\/([A-Za-z0-9_-]+)(?:\/|$)/;
 const sharedStates = new Map();
 
 function normalizeRoom(value) {
@@ -24,13 +26,50 @@ function emptyShareState(room) {
     };
 }
 
+function extractTranscodeSessionId(url, sessionId) {
+    if (sessionId) return String(sessionId);
+    if (!url) return null;
+    const match = String(url).match(TRANSCODE_SESSION_RE);
+    return match ? match[1] : null;
+}
+
+/**
+ * Drop share pointers whose transcode session no longer exists.
+ * Host tabs that close without clearShare leave stale URLs otherwise.
+ */
+function clearSharesForSession(sessionId) {
+    if (!sessionId) return;
+    for (const [room, state] of sharedStates) {
+        const id = extractTranscodeSessionId(state.url, state.sessionId);
+        if (id === sessionId) {
+            sharedStates.delete(room);
+        }
+    }
+}
+
+transcodeSession.onSessionRemoved(clearSharesForSession);
+
 /**
  * Published shares for share.html, keyed by room.
  * position/updatedAt are a snapshot; GET extrapolates while playing.
+ * Dead transcode sessions are cleared so clients treat the room as offline.
  */
 function getLiveShareState(room) {
-    const sharedState = sharedStates.get(room) || emptyShareState(room);
-    if (!sharedState.url || sharedState.updatedAt == null) {
+    const sharedState = sharedStates.get(room);
+    if (!sharedState || !sharedState.url) {
+        return emptyShareState(room);
+    }
+
+    const sessionId = extractTranscodeSessionId(
+        sharedState.url,
+        sharedState.sessionId
+    );
+    if (sessionId && !transcodeSession.hasSession(sessionId)) {
+        sharedStates.delete(room);
+        return emptyShareState(room);
+    }
+
+    if (sharedState.updatedAt == null) {
         return { ...sharedState };
     }
 
